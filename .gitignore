@@ -1,0 +1,32 @@
+
+# Секреты
+.env
+.env.*
+!.env.example
+
+# База данных пользователей
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.sqlite-wal
+*.sqlite-shm
+
+# Виртуальное окружение
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# PyCharm
+.idea/
+
+# Логи
+*.log
+
+# Временные файлы
+*.tmp
