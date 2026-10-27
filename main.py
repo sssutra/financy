@@ -326,6 +326,7 @@ PREMIUM_MAIN_BUTTONS = (
     ('🤖 Воспользоваться ИИ помощником', 'ИИ-помощник', '5258093637450866522'),
     ('✍️ Вписать расход вручную', 'Ручной ввод', '5258328383183396223'),
     ('↩️ Отменить расход', 'Отменить расход', '5258420634785947640'),
+    ('⭐ Подписка', 'Подписка', '5298988357538328017'),
 )
 PREMIUM_MAIN_ACTIONS = {label: old for old, label, _ in PREMIUM_MAIN_BUTTONS}
 
@@ -397,19 +398,107 @@ MANUAL_BUTTON_EMOJI = {
 }
 
 
+# Стоимость тарифов — справочные цены в рублях. Приём оплаты пока НЕ
+# подключён: нельзя выдавать доступ по одному нажатию на кнопку.
+# Для цифровых услуг Telegram требует платежи в Stars (XTR), а
+# стоимость в Stars владелец должен определить отдельно.
+SUBSCRIPTION_MENU_EMOJI_ID = '5298988357538328017'
+SUPPORT_BUTTON_EMOJI_ID = '5258132936401624790'
+SUPPORT_URL = 'https://t.me/sss_utra'
+SUBSCRIPTION_PLAN_EMOJI_ID = '5260221883940347555'
+SUBSCRIPTION_PLANS = (
+    ('1m', '1 месяц', 150),
+    ('3m', '3 месяца', 400),
+    ('6m', '6 месяцев', 600),
+    ('12m', '1 год', 1000),
+)
+
+
+def subscription_keyboard(with_emoji=True):
+    # Выбор тарифа: не списывает средства и не активирует подписку.
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    for plan_id, duration, price_rub in SUBSCRIPTION_PLANS:
+        kb.row(types.InlineKeyboardButton(
+            text=f'{duration} — {price_rub:,} ₽'.replace(',', ' '),
+            callback_data=f'menu:subscription:{plan_id}',
+            **({'icon_custom_emoji_id': SUBSCRIPTION_PLAN_EMOJI_ID}
+               if with_emoji else {}),
+        ))
+    kb.row(types.InlineKeyboardButton(
+        text='Главное меню' if with_emoji else '🏠 Главное меню',
+        callback_data='menu:home',
+        **({'icon_custom_emoji_id': HOME_BUTTON_EMOJI_ID}
+           if with_emoji else {}),
+    ))
+    return kb
+
+
+def subscription_detail_keyboard(with_emoji=True):
+    kb = types.InlineKeyboardMarkup()
+    kb.row(types.InlineKeyboardButton(
+        text='Другие тарифы', callback_data='menu:subscriptions',
+        **({'icon_custom_emoji_id': SUBSCRIPTION_PLAN_EMOJI_ID}
+           if with_emoji else {}),
+    ))
+    kb.row(types.InlineKeyboardButton(
+        text='Главное меню' if with_emoji else '🏠 Главное меню',
+        callback_data='menu:home',
+        **({'icon_custom_emoji_id': HOME_BUTTON_EMOJI_ID}
+           if with_emoji else {}),
+    ))
+    return kb
+
+
+def show_subscriptions(chat_id, uid, message_id=None):
+    clear_state(uid)
+    panel(chat_id,
+          '⭐ Подписка на финансового помощника\n\n'
+          'Выбери срок подписки:\n\n'
+          '• 1 месяц — 150 ₽\n'
+          '• 3 месяца — 400 ₽\n'
+          '• 6 месяцев — 600 ₽\n'
+          '• 1 год — 1 000 ₽\n\n'
+          'ℹ️ Пока это меню выбора тарифа: приём оплаты и выдача '
+          'платного доступа ещё не подключены.',
+          subscription_keyboard(), message_id,
+          fallback_keyboard=subscription_keyboard(with_emoji=False))
+
+
+def show_subscription_plan(chat_id, plan_id, message_id=None):
+    plan = next((p for p in SUBSCRIPTION_PLANS if p[0] == plan_id), None)
+    if plan is None:
+        raise ValueError('Такого тарифа нет')
+    _, duration, price_rub = plan
+    panel(chat_id,
+          f'⭐ Тариф: {duration}\n'
+          f'💰 Стоимость: {price_rub:,} ₽\n\n'.replace(',', ' ') +
+          'ℹ️ Платёжный механизм пока не подключён. '
+          'Тариф выбран. Оплата пока не подключена.',
+          subscription_detail_keyboard(), message_id,
+          fallback_keyboard=subscription_detail_keyboard(with_emoji=False))
+
+
 def main_keyboard(with_emoji=True):
-    """Главное меню — Inline-кнопки под сообщением (как у @yieldobot)."""
+    """Главное Inline-меню: Подписка синяя, Поддержка красная и ведёт в чат."""
     kb = types.InlineKeyboardMarkup(row_width=2)
     buttons = [
         types.InlineKeyboardButton(
-            text=label, callback_data=f'menu:main:{i}',
-            **({'icon_custom_emoji_id': emoji_id} if with_emoji else {})
+            text=label,
+            callback_data=f'menu:main:{i}',
+            **({'icon_custom_emoji_id': emoji_id} if with_emoji else {}),
+            **({'style': 'primary'} if label == 'Подписка' else {}),
         )
         for i, (_, label, emoji_id) in enumerate(PREMIUM_MAIN_BUTTONS)
     ]
-    for i in range(0, 8, 2):
+    buttons.append(types.InlineKeyboardButton(
+        text='Поддержка',
+        url=SUPPORT_URL,
+        style='danger',
+        **({'icon_custom_emoji_id': SUPPORT_BUTTON_EMOJI_ID}
+           if with_emoji else {}),
+    ))
+    for i in range(0, len(buttons), 2):
         kb.row(*buttons[i:i + 2])
-    kb.row(buttons[8])
     return kb
 
 
@@ -504,9 +593,14 @@ def keyboard_without_custom_emoji(keyboard):
     for row in rows:
         buttons = []
         for button in row:
-            data = (button.to_dict() if hasattr(button, 'to_dict') else {
-                'text': button.label, 'callback_data': button.callback_data,
-            })
+            if hasattr(button, 'to_dict'):
+                data = button.to_dict()
+            else:
+                data = {'text': getattr(button, 'text', getattr(button, 'label', ''))}
+                for attr in ('callback_data', 'url', 'style'):
+                    value = getattr(button, attr, None)
+                    if value is not None:
+                        data[attr] = value
             data.pop('icon_custom_emoji_id', None)
             if data.get('callback_data') == 'menu:home':
                 data['text'] = '🏠 Главное меню'
@@ -1467,6 +1561,8 @@ def run_action(uid,chat_id,text,message_id=None):
         set_state(uid,stage=stage,aid=aid)
         panel(chat_id,'Выбери категорию:',category_choice(uid,aid),message_id,
               fallback_keyboard=category_choice(uid,aid,with_emoji=False))
+    elif text=='⭐ Подписка':
+        show_subscriptions(chat_id, uid, message_id)
     elif text=='↩️ Отменить расход':
         with db() as con:
             row=con.execute('''SELECT e.id,e.amount,e.user_id,c.name FROM expenses e
@@ -1484,14 +1580,28 @@ def run_action(uid,chat_id,text,message_id=None):
                             [('🏠 Главное меню','menu:home')]]),message_id)
 
 
+def remove_old_bottom_keyboard(chat_id):
+    """Убирает ReplyKeyboardMarkup старых версий у текущего пользователя.
+
+    Telegram требует отдельного сообщения с ReplyKeyboardRemove: к одному
+    сообщению нельзя одновременно прикрепить удаление и Inline-клавиатуру.
+    """
+    try:
+        bot.send_message(chat_id, '⌨️ Нижняя клавиатура отключена.',
+                         reply_markup=types.ReplyKeyboardRemove())
+    except Exception as exc:
+        print(f'⚠️ Не удалось убрать старую клавиатуру: {exc}')
+
+
 @bot.message_handler(commands=['menu'])
 def open_menu_command(message):
-    """Возврат в главное меню из списка команд слева от поля ввода."""
+    """Открывает Inline-меню; команда работает при ручном вводе."""
     if message.chat.type != 'private':
         return
     uid = message.from_user.id
     ensure_user(uid, message.from_user)
     clear_state(uid)
+    remove_old_bottom_keyboard(message.chat.id)
     show_main_menu(message.chat.id, uid)
 
 
@@ -1518,9 +1628,8 @@ def start(message):
             reply_markup=inline_actions([[('✅ Принять',f'f:join_yes:{tok}'),
                                           ('❌ Отмена',f'f:join_no:{tok}')]]))
         return
-    # Убираем нижнюю ReplyKeyboardMarkup, оставшуюся от предыдущей версии.
-    bot.send_message(message.chat.id, '✅ Главное меню обновлено.',
-                     reply_markup=types.ReplyKeyboardRemove())
+    # Для старых пользователей: окончательно убрать клавиатуру под полем ввода.
+    remove_old_bottom_keyboard(message.chat.id)
     show_main_menu(message.chat.id, uid)
 
 
@@ -1697,6 +1806,15 @@ def handle_menu_callback(uid, chat_id, bits, message_id=None):
         clear_state(uid)
         show_main_menu(chat_id, uid, message_id)
         return
+    if action == 'subscriptions':
+        show_subscriptions(chat_id, uid, message_id)
+        return
+    if action == 'subscription':
+        if len(bits) != 3:
+            raise ValueError('Некорректный тариф')
+        clear_state(uid)
+        show_subscription_plan(chat_id, bits[2], message_id)
+        return
     if action == 'main':
         if len(bits) != 3 or not bits[2].isdigit():
             raise ValueError('Неверная кнопка меню')
@@ -1846,24 +1964,21 @@ def handle_callback_action(uid,chat_id,bits):
 
 
 def configure_telegram_menu():
-    """Показывает /menu в меню команд слева от строки ввода Telegram.
+    """Убирает добавленное нами меню команд слева от поля ввода.
 
-    Telegram сам показывает список команд: прямой callback по нажатию
-    системной кнопки «Меню» в Bot API не предусмотрен.
+    Для пользователей остаётся только Inline-панель под сообщениями бота.
+    Внешний вид системной области ввода определяет сам клиент Telegram.
+    Команды /start и /menu продолжают работать при ручном вводе.
     """
+    for language in ('', 'ru'):
+        try:
+            bot.delete_my_commands(language_code=language)
+        except Exception as exc:
+            print(f'⚠️ Не удалось очистить команды Telegram ({language or "по умолчанию"}): {exc}')
     try:
-        # Сохраняем ранее зарегистрированные команды, добавляя /menu первой.
-        registered_commands = bot.get_my_commands()
-        commands = [types.BotCommand('menu', '🏠 Главное меню')]
-        commands += [item for item in registered_commands
-                     if item.command != 'menu']
-        bot.set_my_commands(commands[:100])
+        bot.set_chat_menu_button(menu_button=types.MenuButtonDefault())
     except Exception as exc:
-        print(f'⚠️ Не удалось настроить список команд Telegram: {exc}')
-    try:
-        bot.set_chat_menu_button(menu_button=types.MenuButtonCommands())
-    except Exception as exc:
-        print(f'⚠️ Не удалось включить системное меню Telegram: {exc}')
+        print(f'⚠️ Не удалось сбросить системную кнопку Telegram: {exc}')
 
 
 if __name__=='__main__':
