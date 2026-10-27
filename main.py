@@ -313,65 +313,358 @@ def clear_state(uid):
         sessions.pop(uid, None)
 
 
-def main_keyboard():
-    k = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    k.row('🏦 Мои счета', '👥 Совместные счета')
-    k.row('💰 Зарплата', '📊 Баланс')
-    k.row('📁 Категории расходов', '🧾 История')
-    k.row('🤖 Воспользоваться ИИ помощником', '✍️ Вписать расход вручную')
-    k.row('↩️ Отменить расход')
-    return k
+# Премиум-эмодзи владельца. Первое меню «Мои счета» обновлено отдельно.
+# Первое поле — прежняя текстовая команда: сохраняется совместимость со
+# старыми ReplyKeyboardMarkup на устройствах пользователей.
+PREMIUM_MAIN_BUTTONS = (
+    ('🏦 Мои счета', 'Мои счета', '5258011929993026890'),
+    ('👥 Совместные счета', 'Совместные счета', '5258362837411045098'),
+    ('💰 Зарплата', 'Зарплата', '5258204546391351475'),
+    ('📊 Баланс', 'Баланс', '5260399854500191689'),
+    ('📁 Категории расходов', 'Категории расходов', '5249231689695115145'),
+    ('🧾 История', 'История', '5253959125838090076'),
+    ('🤖 Воспользоваться ИИ помощником', 'ИИ-помощник', '5258093637450866522'),
+    ('✍️ Вписать расход вручную', 'Ручной ввод', '5258328383183396223'),
+    ('↩️ Отменить расход', 'Отменить расход', '5258420634785947640'),
+)
+PREMIUM_MAIN_ACTIONS = {label: old for old, label, _ in PREMIUM_MAIN_BUTTONS}
+
+# Премиум-значки в списке «Мои счета». У активного счёта обычная
+# Unicode-галочка в конце ТЕКСТА той же кнопки. Второй премиум-эмодзи
+# справа нельзя добавить через Bot API: icon_custom_emoji_id только слева.
+ACCOUNT_SELECTOR_EMOJI = {
+    'personal': '5258011929993026890',
+    'shared': '5258513401784573443',
+    'home': '5257963315258204021',
+    'selected': '5260416304224936047',
+}
+
+
+SALARY_BUTTON_EMOJI = {
+    'edit': '5258215635996908355',
+    'cancel': '5258318620722733379',
+    'home': '5257963315258204021',
+}
+
+
+# Новые значки для пяти кнопок внутри «Категории расходов».
+CATEGORY_BUTTON_EMOJI = {
+    'create': '5274008024585871702',
+    'rename': '5296348778012361146',
+    'delete': '5296678515536581003',
+    'limit': '5296385246579670377',
+    'home': '5257963315258204021',
+}
+
+
+# Премиум-значки раздела «Совместные счета» (сохранён исходный порядок).
+SHARED_ACCOUNT_BUTTON_EMOJI = {
+    'create': '5274008024585871702',
+    'switch': '5260687681733533075',
+    'settings': '5258096772776991776',
+    'home': '5257963315258204021',
+}
+
+
+# Значки внутри «Совместные счета → Настройки активного счёта».
+SHARED_SETTINGS_BUTTON_EMOJI = {
+    'invite': '5258362837411045098',
+    'budget': '5258204546391351475',
+    'delete': '5258130763148172425',
+    'back': '5258236805890710909',
+    'home': '5257963315258204021',
+}
+
+# Один ID для всех кнопок возврата, включая подтверждения и диалоги.
+HOME_BUTTON_EMOJI_ID = '5257963315258204021'
+
+
+# Раздел «Баланс»: сброс расходов и возврат в главное меню.
+BALANCE_BUTTON_EMOJI = {
+    'reset': '5258130763148172425',
+    'home': '5257963315258204021',
+}
+
+# Раздел «История»: возврат в главное меню.
+HISTORY_BUTTON_EMOJI = {
+    'home': '5257963315258204021',
+}
+
+# В окне выбора категории все категории имеют одинаковый премиум-значок.
+MANUAL_BUTTON_EMOJI = {
+    'category': '5257969839313526622',
+    'home': '5257963315258204021',
+}
+
+
+def main_keyboard(with_emoji=True):
+    """Главное меню — Inline-кнопки под сообщением (как у @yieldobot)."""
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    buttons = [
+        types.InlineKeyboardButton(
+            text=label, callback_data=f'menu:main:{i}',
+            **({'icon_custom_emoji_id': emoji_id} if with_emoji else {})
+        )
+        for i, (_, label, emoji_id) in enumerate(PREMIUM_MAIN_BUTTONS)
+    ]
+    for i in range(0, 8, 2):
+        kb.row(*buttons[i:i + 2])
+    kb.row(buttons[8])
+    return kb
 
 
 def cancel_keyboard():
-    k = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    k.row('❌ Отмена / Главное меню')
-    return k
+    # Отмена текстового диалога без возврата к ReplyKeyboardMarkup.
+    return inline_actions([[('🏠 Главное меню', 'menu:home')]])
 
 
-def categories_keyboard():
-    k = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    k.row('➕ Создать категорию', '✏️ Переименовать категорию')
-    k.row('🗑 Удалить категорию', '🎯 Изменить лимит')
-    k.row('🏠 Главное меню')
-    return k
+def categories_keyboard(with_emoji=True):
+    """Пять кнопок категории: функции и callback_data не изменяются."""
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    entries = (
+        ('Создать', 'menu:category_create', 'create', '➕ Создать'),
+        ('Переименовать', 'menu:category_rename', 'rename', '✏️ Переименовать'),
+        ('Удалить', 'menu:category_delete', 'delete', '🗑 Удалить'),
+        ('Изменить лимит', 'menu:category_limit', 'limit', '🎯 Изменить лимит'),
+        ('Главное меню', 'menu:home', 'home', '🏠 Главное меню'),
+    )
+    buttons = [types.InlineKeyboardButton(
+        text=label if with_emoji else fallback,
+        callback_data=data,
+        **({'icon_custom_emoji_id': CATEGORY_BUTTON_EMOJI[key]} if with_emoji else {})
+    ) for label, data, key, fallback in entries]
+    kb.row(*buttons[:2])
+    kb.row(*buttons[2:4])
+    kb.row(buttons[4])
+    return kb
 
 
-def category_choice(uid, aid):
-    k = types.ReplyKeyboardMarkup(resize_keyboard=True)
+def category_choice(uid, aid, with_emoji=True):
+    """Выбор категории (ручной расход и управление категориями)."""
+    kb = types.InlineKeyboardMarkup(row_width=1)
     for c in account_categories(uid, aid):
-        k.add(f"📂 {c['id']}: {c['name']}")
-    k.add('❌ Отмена / Главное меню')
-    return k
+        kb.add(types.InlineKeyboardButton(
+            text=c['name'] if with_emoji else f"📂 {c['name']}",
+            callback_data=f"menu:pick:{c['id']}",
+            **({'icon_custom_emoji_id': MANUAL_BUTTON_EMOJI['category']}
+               if with_emoji else {})
+        ))
+    kb.add(types.InlineKeyboardButton(
+        text='Главное меню' if with_emoji else '🏠 Главное меню',
+        callback_data='menu:home',
+        **({'icon_custom_emoji_id': MANUAL_BUTTON_EMOJI['home']}
+           if with_emoji else {})
+    ))
+    return kb
 
 
-def send(chat_id, text, keyboard=None):
-    bot.send_message(chat_id, text, reply_markup=keyboard if keyboard is not None else main_keyboard())
+def balance_keyboard(reset_token=None, with_emoji=True):
+    """Действия баланса; права на сброс определяются в show_balance."""
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    if reset_token is not None:
+        kb.add(types.InlineKeyboardButton(
+            text='Сбросить расходы месяца' if with_emoji else '🗑 Сбросить расходы месяца',
+            callback_data=f'f:reset_open:{reset_token}',
+            **({'icon_custom_emoji_id': BALANCE_BUTTON_EMOJI['reset']}
+               if with_emoji else {})
+        ))
+    kb.add(types.InlineKeyboardButton(
+        text='Главное меню' if with_emoji else '🏠 Главное меню',
+        callback_data='menu:home',
+        **({'icon_custom_emoji_id': BALANCE_BUTTON_EMOJI['home']}
+           if with_emoji else {})
+    ))
+    return kb
 
 
-def inline_actions(pairs):
+def history_keyboard(with_emoji=True):
+    """Кнопка возврата из истории."""
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(types.InlineKeyboardButton(
+        text='Главное меню' if with_emoji else '🏠 Главное меню',
+        callback_data='menu:home',
+        **({'icon_custom_emoji_id': HISTORY_BUTTON_EMOJI['home']}
+           if with_emoji else {})
+    ))
+    return kb
+
+
+def is_premium_emoji_error(exc):
+    message = str(exc).lower()
+    return any(x in message for x in ('emoji', 'premium', 'button_text_invalid'))
+
+
+def keyboard_without_custom_emoji(keyboard):
+    """Аналог той же Inline-клавиатуры без Premium (с теми же callback)."""
+    rows = getattr(keyboard, 'inline_keyboard', None)
+    if rows is None:
+        # Упрощённые объекты используются только в офлайн-тестах.
+        rows = [[button] for button in getattr(keyboard, 'buttons', [])]
+    plain = types.InlineKeyboardMarkup()
+    for row in rows:
+        buttons = []
+        for button in row:
+            data = (button.to_dict() if hasattr(button, 'to_dict') else {
+                'text': button.label, 'callback_data': button.callback_data,
+            })
+            data.pop('icon_custom_emoji_id', None)
+            if data.get('callback_data') == 'menu:home':
+                data['text'] = '🏠 Главное меню'
+            buttons.append(types.InlineKeyboardButton(**data))
+        if buttons:
+            plain.row(*buttons)
+    return plain
+
+
+def send(chat_id, text, keyboard=None, fallback_keyboard=None):
+    # Остальные ответы — только с кнопкой возврата, без устаревшей нижней клавиатуры.
+    markup = keyboard if keyboard is not None else cancel_keyboard()
+    try:
+        return bot.send_message(chat_id, text, reply_markup=markup)
+    except Exception as exc:
+        if is_premium_emoji_error(exc):
+            plain = (fallback_keyboard if fallback_keyboard is not None
+                     else keyboard_without_custom_emoji(markup))
+            return bot.send_message(chat_id, text, reply_markup=plain)
+        raise
+
+
+def inline_actions(pairs, with_emoji=True):
+    """Все кнопки с menu:home автоматически получают единый Premium ID."""
     k = types.InlineKeyboardMarkup()
     for row in pairs:
-        k.row(*[types.InlineKeyboardButton(label, callback_data=data) for label, data in row])
+        buttons = []
+        for label, data in row:
+            if data == 'menu:home' and with_emoji:
+                buttons.append(types.InlineKeyboardButton(
+                    text='Главное меню', callback_data=data,
+                    icon_custom_emoji_id=HOME_BUTTON_EMOJI_ID,
+                ))
+            else:
+                buttons.append(types.InlineKeyboardButton(label, callback_data=data))
+        k.row(*buttons)
     return k
 
 
-def show_accounts(chat_id, uid):
+def panel(chat_id, text, keyboard, message_id=None, fallback_keyboard=None):
+    """Редактируем открытую панель и корректно откатываем неподдержанные emoji."""
+    # Сервер Telegram вправе отказать в кастомных эмодзи, если у владельца
+    # бота нет доступа к ним. В этом случае кнопки продолжают работать.
+    def is_emoji_error(error):
+        message = str(error).lower()
+        return ('emoji' in message or 'premium' in message or 'button_text_invalid' in message)
+
+    if fallback_keyboard is None:
+        fallback_keyboard = keyboard_without_custom_emoji(keyboard)
+    if message_id is not None:
+        try:
+            return bot.edit_message_text(
+                text, chat_id=chat_id, message_id=message_id, reply_markup=keyboard
+            )
+        except Exception as exc:
+            if 'message is not modified' in str(exc).lower():
+                return None
+            if is_emoji_error(exc):
+                try:
+                    return bot.edit_message_text(
+                        text, chat_id=chat_id, message_id=message_id,
+                        reply_markup=fallback_keyboard
+                    )
+                except Exception:
+                    pass
+            # Сообщение может быть слишком старым для редактирования.
+    try:
+        return bot.send_message(chat_id, text, reply_markup=keyboard)
+    except Exception as exc:
+        if is_emoji_error(exc):
+            return bot.send_message(chat_id, text, reply_markup=fallback_keyboard)
+        raise
+
+
+def show_main_menu(chat_id, uid, message_id=None):
+    a, base, income, spent, _ = account_summary(uid)
+    text = (f"💰 Финансовый помощник\n\n"
+            f"🏦 Активный счёт: {a['name']}\n"
+            f"💸 Расходы за {today_month()}: {rub(spent)}\n"
+            f"💵 Остаток: {rub(base + income - spent)}\n\n"
+            'Выбери действие:')
+    return panel(chat_id, text, main_keyboard(), message_id)
+
+
+
+def account_selector_keyboard(rows, current, with_emoji=True):
+    """Одна кнопка на счёт. Основная иконка слева, отметка справа в тексте.
+
+    Премиум-галочка справа невозможна через Bot API: icon_custom_emoji_id
+    допускает лишь один значок перед текстом. Поэтому справа обычная ✅.
+    """
+    kb = types.InlineKeyboardMarkup()
+    for row in rows:
+        selected = row['id'] == current
+        account_kind = row['kind']
+        callback = f"acc:switch:{row['id']}"
+        suffix = ' ✅' if selected else ''
+        if with_emoji:
+            kb.row(types.InlineKeyboardButton(
+                text=row['name'] + suffix,
+                callback_data=callback,
+                icon_custom_emoji_id=ACCOUNT_SELECTOR_EMOJI[account_kind],
+            ))
+        else:
+            prefix = '🔒 ' if account_kind == 'personal' else '👥 '
+            kb.row(types.InlineKeyboardButton(
+                text=prefix + row['name'] + suffix,
+                callback_data=callback,
+            ))
+    if with_emoji:
+        kb.row(types.InlineKeyboardButton(
+            text='Главное меню', callback_data='menu:home',
+            icon_custom_emoji_id=ACCOUNT_SELECTOR_EMOJI['home'],
+        ))
+    else:
+        kb.row(types.InlineKeyboardButton(
+            text='🏠 Главное меню', callback_data='menu:home',
+        ))
+    return kb
+
+
+def show_accounts(chat_id, uid, message_id=None):
     with db() as con:
         current = account_for(con, uid)['id']
         rows = con.execute('''SELECT a.id,a.name,a.kind,a.mode FROM accounts a
             JOIN account_members m ON m.account_id=a.id WHERE m.user_id=?
             ORDER BY a.kind,a.id''', (uid,)).fetchall()
+    panel(
+        chat_id,
+        '🏦 Выбери активный счёт.\nЛичные данные другим не показываются.',
+        account_selector_keyboard(rows, current, with_emoji=True),
+        message_id,
+        fallback_keyboard=account_selector_keyboard(rows, current, with_emoji=False),
+    )
+
+
+def shared_accounts_keyboard(has_accounts, with_emoji=True):
+    """Кнопки раздела совместных счетов с запасным вариантом без Premium."""
     kb = types.InlineKeyboardMarkup()
-    for row in rows:
-        label = ('🔒 ' if row['kind']=='personal' else '👥 ') + row['name']
-        if row['id']==current:
-            label += ' ✅'
-        kb.add(types.InlineKeyboardButton(label, callback_data=f"acc:switch:{row['id']}"))
-    bot.send_message(chat_id, '🏦 Выбери активный счёт.\nЛичные данные другим не показываются.', reply_markup=kb)
+    entries = [
+        ('Создать счёт', 'acc:create', 'create', '➕ Создать счёт'),
+        ('Переключить счёт', 'acc:list', 'switch', '🏦 Переключить счёт'),
+    ]
+    if has_accounts:
+        entries.append(('Настройки активного счёта', 'acc:settings', 'settings',
+                        '⚙️ Настройки активного счёта'))
+    entries.append(('Главное меню', 'menu:home', 'home', '🏠 Главное меню'))
+    for label, callback, key, fallback_label in entries:
+        kb.add(types.InlineKeyboardButton(
+            text=label if with_emoji else fallback_label,
+            callback_data=callback,
+            **({'icon_custom_emoji_id': SHARED_ACCOUNT_BUTTON_EMOJI[key]}
+               if with_emoji else {}),
+        ))
+    return kb
 
 
-def shared_accounts_menu(chat_id, uid):
+def shared_accounts_menu(chat_id, uid, message_id=None):
     with db() as con:
         rows = con.execute('''SELECT a.id, a.name, m.role FROM accounts a
             JOIN account_members m ON m.account_id=a.id
@@ -379,15 +672,39 @@ def shared_accounts_menu(chat_id, uid):
     labels = [f"• {x['name']} — {'владелец' if x['role']=='owner' else 'участник'}"
               for x in rows]
     text = '👥 Совместные счета:\n\n' + ('\n'.join(labels) if labels else 'Пока нет совместных счетов.')
+    panel(chat_id, text, shared_accounts_keyboard(bool(rows)), message_id,
+          fallback_keyboard=shared_accounts_keyboard(bool(rows), with_emoji=False))
+
+
+def shared_settings_keyboard(role, with_emoji=True):
+    """Кнопки настроек, включая разные действия владельца и участника."""
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton('➕ Создать счёт', callback_data='acc:create'))
-    kb.add(types.InlineKeyboardButton('🏦 Переключить счёт', callback_data='acc:list'))
-    if rows:
-        kb.add(types.InlineKeyboardButton('⚙️ Настройки активного счёта', callback_data='acc:settings'))
-    bot.send_message(chat_id, text, reply_markup=kb)
+    if role == 'owner':
+        entries = (
+            ('Пригласить человека', 'acc:invite', 'invite', '🔗 Пригласить человека'),
+            ('Бюджет на месяц', 'acc:budget', 'budget', '💰 Бюджет на месяц'),
+            ('Удалить совместный счёт', 'acc:delete', 'delete', '🗑 Удалить совместный счёт'),
+        )
+    else:
+        # Участник может только выйти; используем значок удаления/выхода.
+        entries = (
+            ('Выйти из счёта', 'acc:leave', 'delete', '🚪 Выйти из счёта'),
+        )
+    entries += (
+        ('К совместным счетам', 'menu:main:1', 'back', '⬅️ К совместным счетам'),
+        ('Главное меню', 'menu:home', 'home', '🏠 Главное меню'),
+    )
+    for label, callback, key, fallback in entries:
+        kb.add(types.InlineKeyboardButton(
+            text=label if with_emoji else fallback,
+            callback_data=callback,
+            **({'icon_custom_emoji_id': SHARED_SETTINGS_BUTTON_EMOJI[key]}
+               if with_emoji else {}),
+        ))
+    return kb
 
 
-def account_settings(chat_id, uid):
+def account_settings(chat_id, uid, message_id=None):
     a = active_account(uid)
     if a['kind'] != 'shared':
         send(chat_id, 'Сначала выбери совместный счёт в разделе «🏦 Мои счета».')
@@ -405,14 +722,8 @@ def account_settings(chat_id, uid):
         if m['role'] == 'owner':
             text += ' (владелец)'
         text += '\n'
-    kb = types.InlineKeyboardMarkup()
-    if a['role'] == 'owner':
-        kb.add(types.InlineKeyboardButton('🔗 Пригласить человека', callback_data='acc:invite'))
-        kb.add(types.InlineKeyboardButton('💰 Бюджет на месяц', callback_data='acc:budget'))
-        kb.add(types.InlineKeyboardButton('🗑 Удалить совместный счёт', callback_data='acc:delete'))
-    else:
-        kb.add(types.InlineKeyboardButton('🚪 Выйти из счёта', callback_data='acc:leave'))
-    bot.send_message(chat_id, text, reply_markup=kb)
+    panel(chat_id, text, shared_settings_keyboard(a['role']), message_id,
+          fallback_keyboard=shared_settings_keyboard(a['role'], with_emoji=False))
 
 
 def create_shared(uid, name, amount=0):
@@ -525,23 +836,48 @@ def switch_account(uid, aid):
         return a['name']
 
 
-def show_salary(chat_id, uid):
+def salary_keyboard(token, with_emoji=True):
+    """Три Inline-кнопки «Зарплата» с новыми кастомными значками."""
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    items = (
+        ('Изменить', f'f:salary_edit:{token}', 'edit', '✏️ Изменить'),
+        ('Отмена', f'f:salary_cancel:{token}', 'cancel', '❌ Отмена'),
+        ('Главное меню', 'menu:home', 'home', '🏠 Главное меню'),
+    )
+    buttons = [
+        types.InlineKeyboardButton(
+            text=label if with_emoji else fallback,
+            callback_data=data,
+            **({'icon_custom_emoji_id': SALARY_BUTTON_EMOJI[key]} if with_emoji else {})
+        ) for label, data, key, fallback in items
+    ]
+    kb.row(*buttons[:2])
+    kb.row(buttons[2])
+    return kb
+
+
+def show_salary(chat_id, uid, message_id=None):
     with db() as con:
         salary=con.execute('SELECT salary FROM users WHERE user_id=?',(uid,)).fetchone()['salary']
     token=secrets.token_hex(8)
     set_state(uid,stage='salary_offer',token=token)
-    bot.send_message(chat_id,f'💰 Личная зарплата: {rub(salary)}\nИзменить?',
-        reply_markup=inline_actions([[('✏️ Изменить',f'f:salary_edit:{token}'),
-                                      ('❌ Отмена',f'f:salary_cancel:{token}')]]))
+    panel(
+        chat_id, f'💰 Личная зарплата: {rub(salary)}\nИзменить?',
+        salary_keyboard(token), message_id,
+        fallback_keyboard=salary_keyboard(token, with_emoji=False)
+    )
 
 
-def show_categories(chat_id, uid):
+def show_categories(chat_id, uid, message_id=None):
     a=active_account(uid)
     cats=account_categories(uid,a['id'])
     lines=[f"• {x['name']}: {rub(x['budget'])}" for x in cats]
-    keyboard=categories_keyboard() if (a['kind']=='personal' or a['role']=='owner') else main_keyboard()
-    send(chat_id, f"📁 Категории расходов — {a['name']}:\n\n"+
-         ('\n'.join(lines) if lines else 'Категорий пока нет.'), keyboard)
+    can_edit = (a['kind']=='personal' or a['role']=='owner')
+    keyboard = categories_keyboard() if can_edit else cancel_keyboard()
+    fallback = categories_keyboard(with_emoji=False) if can_edit else cancel_keyboard()
+    panel(chat_id, f"📁 Категории расходов — {a['name']}:\n\n"+
+          ('\n'.join(lines) if lines else 'Категорий пока нет.'),
+          keyboard, message_id, fallback_keyboard=fallback)
 
 
 def account_summary(uid, aid=None):
@@ -567,7 +903,7 @@ def account_summary(uid, aid=None):
     return a, base, income, spent, cats
 
 
-def show_balance(chat_id, uid):
+def show_balance(chat_id, uid, message_id=None):
     a, base, income, spent, cats = account_summary(uid)
     text = (f"📊 {a['name']} — {today_month()}\n\n"
             f"💸 Расходы: {rub(spent)}\n")
@@ -585,13 +921,14 @@ def show_balance(chat_id, uid):
         text += ' пока нет.'
     if a['kind']=='personal' or a['role']=='owner':
         tok = new_confirmation(uid, 'reset_offer', a['id'])
-        kb = inline_actions([[('🗑 Сбросить расходы месяца', f'f:reset_open:{tok}')]])
-        bot.send_message(chat_id, text, reply_markup=kb)
+        panel(chat_id, text, balance_keyboard(tok), message_id,
+              fallback_keyboard=balance_keyboard(tok, with_emoji=False))
     else:
-        send(chat_id, text)
+        panel(chat_id, text, balance_keyboard(), message_id,
+              fallback_keyboard=balance_keyboard(with_emoji=False))
 
 
-def show_history(chat_id, uid):
+def show_history(chat_id, uid, message_id=None):
     with db() as con:
         a = account_for(con, uid)
         rows = con.execute('''SELECT e.amount,e.description,e.created_at,c.name,
@@ -617,7 +954,8 @@ def show_history(chat_id, uid):
         text += f"\n+ {rub(r['amount'])}, прежний доход — {r['description'] or 'Без описания'}"
     if not rows and not inc:
         text += '\nЗа этот месяц пока нет операций.'
-    send(chat_id, text)
+    panel(chat_id, text, history_keyboard(), message_id,
+          fallback_keyboard=history_keyboard(with_emoji=False))
 
 
 def record_expense(uid, aid, category_id, amount, description=''):
@@ -856,7 +1194,7 @@ def handle_manual(uid,chat_id,text,state):
                 cur=con.execute('''UPDATE categories SET name=? WHERE id=? AND account_id=? AND archived=0''',
                                 (name,state['category_id'],aid))
             clear_state(uid)
-            send(chat_id,'✅ Категория переименована.' if cur.rowcount else 'Категория уже удалена.',categories_keyboard())
+            send(chat_id,'✅ Категория переименована.' if cur.rowcount else 'Категория уже удалена.',categories_keyboard(), fallback_keyboard=categories_keyboard(with_emoji=False))
         else:
             set_state(uid,stage='category_budget',aid=aid,name=name)
             send(chat_id,f'Укажи месячный лимит для «{name}»:',cancel_keyboard())
@@ -870,7 +1208,8 @@ def handle_manual(uid,chat_id,text,state):
         if match:
             category=next((c for c in account_categories(uid,aid) if c['id']==int(match.group(1))),None)
         if category is None:
-            send(chat_id,'Выбери категорию кнопкой.',category_choice(uid,aid));return
+            send(chat_id, 'Выбери категорию кнопкой.', category_choice(uid,aid),
+                 fallback_keyboard=category_choice(uid,aid,with_emoji=False));return
         cat_id=category['id']
         if stage=='pick_expense':
             set_state(uid,stage='expense_amount',aid=aid,category_id=cat_id)
@@ -931,7 +1270,7 @@ def handle_manual(uid,chat_id,text,state):
                 con.execute('''INSERT INTO categories(user_id,name,budget,archived,account_id)
                     VALUES (?,?,?,0,?)''',(legacy_bucket,name,amount,aid))
         clear_state(uid)
-        send(chat_id,'✅ Категория создана/восстановлена.',categories_keyboard());return
+        send(chat_id,'✅ Категория создана/восстановлена.',categories_keyboard(), fallback_keyboard=categories_keyboard(with_emoji=False));return
     if stage=='limit_amount':
         with db() as con:
             con.execute('BEGIN IMMEDIATE')
@@ -1077,52 +1416,57 @@ def process_ai(uid, chat_id, text, state, *, voice=None):
     )
 
 
-def run_action(uid,chat_id,text):
+def run_action(uid,chat_id,text,message_id=None):
+    # Новые кнопки отправляют текст без обычных эмодзи. При этом старые
+    # сообщения/кнопки продолжают обрабатываться прежними ветками.
+    text = PREMIUM_MAIN_ACTIONS.get(text, text)
     a=active_account(uid)
     aid=a['id']
     if text=='🏦 Мои счета':
-        show_accounts(chat_id,uid)
+        show_accounts(chat_id,uid,message_id)
     elif text=='👥 Совместные счета':
-        shared_accounts_menu(chat_id,uid)
+        shared_accounts_menu(chat_id,uid,message_id)
     elif text=='💰 Зарплата':
-        show_salary(chat_id,uid)
+        show_salary(chat_id,uid,message_id)
     elif text=='📊 Баланс':
-        show_balance(chat_id,uid)
+        show_balance(chat_id,uid,message_id)
     elif text=='📁 Категории расходов' or text=='📁 Категории':
-        show_categories(chat_id,uid)
+        show_categories(chat_id,uid,message_id)
     elif text=='🧾 История':
-        show_history(chat_id,uid)
+        show_history(chat_id,uid,message_id)
     elif text=='🤖 Воспользоваться ИИ помощником':
         if not ai_client:
             send(chat_id,'⚠️ GEMINI_API_KEY отсутствует в .env');return
         if not account_categories(uid,aid):
             send(chat_id,'Сначала создай хотя бы одну категорию расходов.');return
         set_state(uid,stage='ai_ready',aid=aid)
-        send(chat_id,f"🤖 ИИ включён для «{a['name']}». Напиши одну или несколько покупок.\n"
+        panel(chat_id,f"🤖 ИИ включён для «{a['name']}». Напиши одну или несколько покупок.\n"
                      'Например: «Картошка за 1000 и помидоры за 500».\n'
                      '🎙 Также можно отправить голосовое сообщение (до 90 секунд).\n'
                      'Для распознавания голос отправляется в Gemini.\n'
-                     'Выход — «❌ Отмена / Главное меню».',cancel_keyboard())
+                     'Выход — кнопка «🏠 Главное меню».',cancel_keyboard(),message_id)
     elif text=='✍️ Вписать расход вручную' or text=='➕ Расход':
         if not account_categories(uid,aid):
             send(chat_id,'Сначала создай категорию расходов.');return
         set_state(uid,stage='pick_expense',aid=aid)
-        send(chat_id,'Выбери категорию:',category_choice(uid,aid))
+        panel(chat_id,'Выбери категорию:',category_choice(uid,aid),message_id,
+              fallback_keyboard=category_choice(uid,aid,with_emoji=False))
     elif text=='➕ Создать категорию':
         with db() as con:
             require_category_manager(con,uid,aid)
         set_state(uid,stage='category_name',aid=aid)
-        send(chat_id,'Название новой категории:',cancel_keyboard())
+        panel(chat_id,'Название новой категории:',cancel_keyboard(),message_id)
     elif text in ('✏️ Переименовать категорию','🗑 Удалить категорию','🎯 Изменить лимит'):
         with db() as con:
             require_category_manager(con,uid,aid)
         if not account_categories(uid,aid):
-            send(chat_id,'Пока нет категорий.',categories_keyboard());return
+            send(chat_id,'Пока нет категорий.',categories_keyboard(), fallback_keyboard=categories_keyboard(with_emoji=False));return
         stage={'✏️ Переименовать категорию':'pick_rename',
                '🗑 Удалить категорию':'pick_delete',
                '🎯 Изменить лимит':'pick_limit'}[text]
         set_state(uid,stage=stage,aid=aid)
-        send(chat_id,'Выбери категорию:',category_choice(uid,aid))
+        panel(chat_id,'Выбери категорию:',category_choice(uid,aid),message_id,
+              fallback_keyboard=category_choice(uid,aid,with_emoji=False))
     elif text=='↩️ Отменить расход':
         with db() as con:
             row=con.execute('''SELECT e.id,e.amount,e.user_id,c.name FROM expenses e
@@ -1134,9 +1478,21 @@ def run_action(uid,chat_id,text):
             send(chat_id,'Последнюю покупку внёс другой участник. Удалить её может автор или владелец.')
             return
         tok=new_confirmation(uid,'undo_confirm',aid,expense_id=row['id'])
-        bot.send_message(chat_id,f"↩️ Удалить последний расход «{row['name']}» на {rub(row['amount'])}?",
-            reply_markup=inline_actions([[('✅ Подтвердить',f'f:undo_yes:{tok}'),
-                                          ('❌ Отмена',f'f:undo_no:{tok}')]]))
+        panel(chat_id,f"↩️ Удалить последний расход «{row['name']}» на {rub(row['amount'])}?",
+            inline_actions([[('✅ Подтвердить',f'f:undo_yes:{tok}'),
+                             ('❌ Отмена',f'f:undo_no:{tok}')],
+                            [('🏠 Главное меню','menu:home')]]),message_id)
+
+
+@bot.message_handler(commands=['menu'])
+def open_menu_command(message):
+    """Возврат в главное меню из списка команд слева от поля ввода."""
+    if message.chat.type != 'private':
+        return
+    uid = message.from_user.id
+    ensure_user(uid, message.from_user)
+    clear_state(uid)
+    show_main_menu(message.chat.id, uid)
 
 
 @bot.message_handler(commands=['start','help'])
@@ -1162,9 +1518,10 @@ def start(message):
             reply_markup=inline_actions([[('✅ Принять',f'f:join_yes:{tok}'),
                                           ('❌ Отмена',f'f:join_no:{tok}')]]))
         return
-    send(message.chat.id,'👋 Финансовый помощник.\n'
-        'Личный счёт уже создан. Для общего бюджета открой «👥 Совместные счета».\n'
-        'Для голосовых покупок включи «🤖 Воспользоваться ИИ помощником».')
+    # Убираем нижнюю ReplyKeyboardMarkup, оставшуюся от предыдущей версии.
+    bot.send_message(message.chat.id, '✅ Главное меню обновлено.',
+                     reply_markup=types.ReplyKeyboardRemove())
+    show_main_menu(message.chat.id, uid)
 
 
 @bot.message_handler(content_types=['text'])
@@ -1176,7 +1533,7 @@ def on_text(message):
     text=(message.text or '').strip()
     if text in ('❌ Отмена / Главное меню','🏠 Главное меню','/cancel'):
         clear_state(uid)
-        send(message.chat.id,'🏠 Главное меню')
+        show_main_menu(message.chat.id, uid)
         return
     actions={'🏦 Мои счета','👥 Совместные счета','💰 Зарплата','📊 Баланс',
              '📁 Категории расходов','📁 Категории','🧾 История',
@@ -1184,7 +1541,7 @@ def on_text(message):
              '↩️ Отменить расход','➕ Создать категорию',
              '✏️ Переименовать категорию','🗑 Удалить категорию',
              '🎯 Изменить лимит','➕ Расход'}
-    if text in actions:
+    if text in actions or text in PREMIUM_MAIN_ACTIONS:
         clear_state(uid)
         try:
             run_action(uid,message.chat.id,text)
@@ -1194,7 +1551,7 @@ def on_text(message):
         return
     state=get_state(uid)
     if not state:
-        send(message.chat.id,'Выбери действие кнопкой в главном меню.')
+        show_main_menu(message.chat.id, uid)
         return
     try:
         if state['stage']=='ai_ready':
@@ -1241,7 +1598,7 @@ def on_voice(message):
 
 
 @bot.callback_query_handler(func=lambda c: bool(c.data and
-    (c.data.startswith('acc:') or c.data.startswith('f:'))))
+    (c.data.startswith('menu:') or c.data.startswith('acc:') or c.data.startswith('f:'))))
 def on_callback(call):
     if not call.message or call.message.chat.type!='private':
         bot.answer_callback_query(call.id)
@@ -1251,33 +1608,36 @@ def on_callback(call):
     ensure_user(uid, call.from_user)
     bits=(call.data or '').split(':')
     try:
-        if bits[0]=='acc':
+        if bits[0]=='menu':
+            handle_menu_callback(uid, chat_id, bits, getattr(call.message, "message_id", None))
+        elif bits[0]=='acc':
             cmd=bits[1]
             # Это навигационные действия. Проверка членства выполняется в функциях.
             if cmd=='list':
-                show_accounts(chat_id,uid)
+                show_accounts(chat_id,uid,getattr(call.message, "message_id", None))
             elif cmd=='create':
                 set_state(uid,stage='account_name')
-                send(chat_id,'Как назвать новый совместный счёт?',cancel_keyboard())
+                panel(chat_id,'Как назвать новый совместный счёт?',cancel_keyboard(),getattr(call.message, "message_id", None))
             elif cmd=='switch':
-                name=switch_account(uid,int(bits[2]))
+                switch_account(uid,int(bits[2]))
                 clear_state(uid)
-                send(chat_id,f'✅ Активный счёт: «{name}».')
+                show_main_menu(chat_id,uid,getattr(call.message, "message_id", None))
             elif cmd=='settings':
-                account_settings(chat_id,uid)
+                account_settings(chat_id,uid,getattr(call.message, "message_id", None))
             elif cmd=='invite':
                 a=active_account(uid)
                 raw=make_invitation(uid,a['id'])
                 username=bot.get_me().username
                 url=f'https://t.me/{username}?start=join_{raw}'
-                send(chat_id,f"🔗 Приглашение в «{a['name']}»:\n{url}\n\n"
-                             'Ссылка одноразовая и действует 24 часа. Передавай её только нужному человеку.')
+                panel(chat_id,f"🔗 Приглашение в «{a['name']}»:\n{url}\n\n"
+                      'Ссылка одноразовая и действует 24 часа. Передавай её только нужному человеку.',
+                      cancel_keyboard(),getattr(call.message, "message_id", None))
             elif cmd=='budget':
                 a=active_account(uid)
                 if a['role']!='owner' or a['kind']!='shared':
                     raise PermissionError('Нет прав на изменение бюджета')
                 set_state(uid,stage='shared_budget_amount',aid=a['id'])
-                send(chat_id,'Введи новый месячный бюджет общего счёта:',cancel_keyboard())
+                panel(chat_id,'Введи новый месячный бюджет общего счёта:',cancel_keyboard(),getattr(call.message, "message_id", None))
             elif cmd=='delete':
                 a=active_account(uid)
                 if a['kind']!='shared' or a['role']!='owner' or a['owner_id']!=uid:
@@ -1288,15 +1648,16 @@ def on_callback(call):
                     member_count=con.execute('SELECT COUNT(*) FROM account_members WHERE account_id=?',
                                               (a['id'],)).fetchone()[0]
                 tok=new_confirmation(uid,'account_delete_confirm',a['id'])
-                bot.send_message(chat_id,
+                panel(chat_id,
                     f"⚠️ Удалить совместный счёт «{a['name']}»?\n\n"
                     f"Участников: {member_count}\nРасходов в истории: {total_expenses}\n\n"
                     'Вся история, категории, бюджет и приглашения этого счёта будут удалены '
                     'без возможности восстановления. Все участники потеряют доступ. '
                     'Их личные счета останутся без изменений.\n\n'
                     'Подтвердить удаление?',
-                    reply_markup=inline_actions([[('🗑 Подтвердить удаление',f'f:account_delete_yes:{tok}'),
-                                                   ('❌ Отмена',f'f:account_delete_no:{tok}')]]))
+                    inline_actions([[('🗑 Подтвердить удаление',f'f:account_delete_yes:{tok}'),
+                                     ('❌ Отмена',f'f:account_delete_no:{tok}')],
+                                    [('🏠 Главное меню','menu:home')]]),getattr(call.message, "message_id", None))
 
 
             elif cmd=='leave':
@@ -1304,9 +1665,10 @@ def on_callback(call):
                 if a['kind']!='shared' or a['role']!='member':
                     raise PermissionError('Выйти может только приглашённый участник')
                 tok=new_confirmation(uid,'leave_confirm',a['id'])
-                bot.send_message(chat_id,'🚪 Выйти из совместного счёта? Доступ к общей истории исчезнет.',
-                    reply_markup=inline_actions([[('✅ Выйти',f'f:leave_yes:{tok}'),
-                                                  ('❌ Отмена',f'f:leave_no:{tok}')]]))
+                panel(chat_id,'🚪 Выйти из совместного счёта? Доступ к общей истории исчезнет.',
+                    inline_actions([[('✅ Выйти',f'f:leave_yes:{tok}'),
+                                    ('❌ Отмена',f'f:leave_no:{tok}')],
+                                   [('🏠 Главное меню','menu:home')]]),getattr(call.message, "message_id", None))
             else:
                 raise ValueError('Неизвестное действие')
 
@@ -1324,6 +1686,50 @@ def on_callback(call):
             bot.answer_callback_query(call.id)
         except Exception:
             pass
+
+
+def handle_menu_callback(uid, chat_id, bits, message_id=None):
+    """Главное меню, категории и выбор категорий через callback_data."""
+    if len(bits) < 2:
+        raise ValueError('Неизвестная кнопка меню')
+    action = bits[1]
+    if action == 'home':
+        clear_state(uid)
+        show_main_menu(chat_id, uid, message_id)
+        return
+    if action == 'main':
+        if len(bits) != 3 or not bits[2].isdigit():
+            raise ValueError('Неверная кнопка меню')
+        idx = int(bits[2])
+        if not 0 <= idx < len(PREMIUM_MAIN_BUTTONS):
+            raise ValueError('Неверная кнопка меню')
+        clear_state(uid)
+        run_action(uid, chat_id, PREMIUM_MAIN_BUTTONS[idx][0], message_id)
+        return
+    category_actions = {
+        'category_create': '➕ Создать категорию',
+        'category_rename': '✏️ Переименовать категорию',
+        'category_delete': '🗑 Удалить категорию',
+        'category_limit': '🎯 Изменить лимит',
+    }
+    if action in category_actions:
+        clear_state(uid)
+        run_action(uid, chat_id, category_actions[action], message_id)
+        return
+    if action == 'pick':
+        if len(bits) != 3 or not bits[2].isdigit():
+            raise ValueError('Неверная категория')
+        state = get_state(uid)
+        if state.get('stage') not in ('pick_expense','pick_limit','pick_rename','pick_delete'):
+            raise ValueError('Выбор устарел. Открой нужное действие заново')
+        category_id = int(bits[2])
+        aid = state.get('aid')
+        category = next((c for c in account_categories(uid, aid) if c['id'] == category_id), None)
+        if category is None:
+            raise ValueError('Этой категории уже нет')
+        handle_manual(uid, chat_id, f"📂 {category_id}: {category['name']}", state)
+        return
+    raise ValueError('Неизвестная кнопка меню')
 
 
 def handle_callback_action(uid,chat_id,bits):
@@ -1439,8 +1845,29 @@ def handle_callback_action(uid,chat_id,bits):
     raise ValueError('Неизвестное действие')
 
 
+def configure_telegram_menu():
+    """Показывает /menu в меню команд слева от строки ввода Telegram.
+
+    Telegram сам показывает список команд: прямой callback по нажатию
+    системной кнопки «Меню» в Bot API не предусмотрен.
+    """
+    try:
+        # Сохраняем ранее зарегистрированные команды, добавляя /menu первой.
+        registered_commands = bot.get_my_commands()
+        commands = [types.BotCommand('menu', '🏠 Главное меню')]
+        commands += [item for item in registered_commands
+                     if item.command != 'menu']
+        bot.set_my_commands(commands[:100])
+    except Exception as exc:
+        print(f'⚠️ Не удалось настроить список команд Telegram: {exc}')
+    try:
+        bot.set_chat_menu_button(menu_button=types.MenuButtonCommands())
+    except Exception as exc:
+        print(f'⚠️ Не удалось включить системное меню Telegram: {exc}')
+
+
 if __name__=='__main__':
     init_db()
+    configure_telegram_menu()
     print('✅ Финансовый помощник: личные + совместные счета запущен')
     bot.infinity_polling(skip_pending=True,timeout=20,long_polling_timeout=20)
-
